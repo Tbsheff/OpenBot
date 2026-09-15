@@ -116,7 +116,7 @@ and the fix would not be available.
 | Variable | |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL with the `vector` extension. Not needed with `EMBEDDED_POSTGRES=on` |
-| an identity provider | `GOOGLE_OAUTH_*`, `MICROSOFT_OAUTH_*` or `OKTA_OAUTH_*`, with `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` and `INITIAL_ADMIN_EMAILS`. See the README |
+| an identity provider | `GOOGLE_OAUTH_*` or `OKTA_OAUTH_*`, with `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET` and `INITIAL_ADMIN_EMAILS`. See the README |
 | `EMBEDDED_POSTGRES` | `on` to run the database inside the container. Off by default |
 | `KEY_ENCRYPTION_KEY` | base64 32 bytes. `openssl rand -base64 32`. The example key is refused in production |
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_API_KEY` | CopilotKit Intelligence. A free plan is available and it can be self-hosted |
@@ -134,7 +134,7 @@ reachable from this container. Unset it if your `.env` still has the laptop defa
 
 **Authentication is required.** With no identity provider configured, the deployment refuses to start,
 because a public URL where every visitor is an administrator fails silently: it looks like it works.
-Configure Google, Microsoft or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
+Configure Google or Okta, or set `OPENBOT_SINGLE_USER=true` to say you meant an open
 deployment. `NODE_ENV` does not affect this.
 
 **Put TLS in front of it.** Not only for the cookies. A page served from `http://<address>` is not a
@@ -180,6 +180,8 @@ can answer a click the first one snapshotted. Run more than one if the platform 
 supervisor is still not in this image, so every replica shares the one browser inside it.
 
 ## Platform notes
+
+**Private two-host AWS subscription workers.** This fork also has a personal EC2 deployment that keeps OpenBot on one control host and Codex and Grok on a separate worker host. It uses ECR digests, SSM, retained provider auth volumes, fixed concurrency, owner email admission, CloudWatch alerts, and AWS Backup. Claude is present but disabled until its release gate passes. See [the AWS deployment runbook](runbooks/aws-deployment.md). This is a private single-owner mode, not a way to share personal provider subscriptions.
 
 **Google Cloud Run.** Set memory to at least 2 GB. More than one instance is fine (see Replicas
 above); each instance has its own browser, so a Bot's logins stay on whichever instance served them.

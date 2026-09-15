@@ -109,6 +109,32 @@ export function mapEntraProfile(profile: Record<string, unknown>) {
   return { email };
 }
 
+function isConfiguredOwner(ownerEmail: string, candidateEmail: string) {
+  return candidateEmail.trim().toLowerCase() === ownerEmail;
+}
+
+async function refuseNonOwner(
+  ownerEmail: string | undefined,
+  candidateEmail: string,
+  auditStore: AuditStore | undefined,
+  userId?: string,
+): Promise<void> {
+  if (!ownerEmail) return;
+  if (isConfiguredOwner(ownerEmail, candidateEmail)) return;
+  await record(auditStore, {
+    eventType: "session.refused",
+    targetType: "person",
+    ...(userId ? { targetId: userId, actorUserId: userId } : {}),
+    payload: {
+      email: candidateEmail,
+      reason: "identity is not the configured owner",
+    },
+  });
+  throw new APIError("FORBIDDEN", {
+    message: "Only the configured owner can access this deployment.",
+  });
+}
+
 export function createAuth(
   config: DeploymentConfig,
   database: Database,
@@ -244,6 +270,7 @@ export function createAuth(
            * list is keyed on the address rather than the id.
            */
           before: async (user) => {
+            await refuseNonOwner(authConfig.ownerEmail, user.email, auditStore);
             if (await isRevoked?.(user.email)) {
               // The row a removed person coming back produces. Nothing else records the attempt:
               // no user row is written and no session exists to look at afterwards.
@@ -288,6 +315,14 @@ export function createAuth(
               .from(users)
               .where(eq(users.id, session.userId))
               .limit(1);
+            if (user) {
+              await refuseNonOwner(
+                authConfig.ownerEmail,
+                user.email,
+                auditStore,
+                session.userId,
+              );
+            }
             if (user && (await isRevoked?.(user.email))) {
               await record(auditStore, {
                 eventType: "session.refused",

@@ -73,6 +73,8 @@ export type ComputerConfig =
  * One identity provider is a product decision somebody else already made. A company running this
  * has Google or Entra or Okta and is not going to acquire another, so the shape here is a set of
  * optional providers rather than one required one, and the deployment turns on whichever it has.
+ * Microsoft remains in the shared auth shape for existing runtime code, but this owner-only release
+ * refuses its environment configuration until access binds immutable Entra tenant and object IDs.
  */
 export type AuthProviderId = "google" | "microsoft" | "okta";
 
@@ -83,6 +85,7 @@ export type AuthConfig = {
   baseUrl: string;
   secret: string;
   trustedOrigins: string[];
+  ownerEmail?: string;
   initialAdminEmails: string[];
   google?: OAuthClient;
   /**
@@ -117,7 +120,7 @@ export type ManagedAgentConfig = {
   /** The bundled Bot, absent when this deployment's provider cannot run it. */
   endpoint?: URL;
   /** Secret sent only to endpoints this deployment runs. Never stored in an agent row. */
-  token: string;
+  token?: string;
   /**
    * The harness picked during setup, when there is one.
    *
@@ -125,6 +128,15 @@ export type ManagedAgentConfig = {
    * it chose, holding this token. It gets the same header for the same reason.
    */
   alsoRun?: URL;
+  subscriptionWorkers?: SubscriptionWorkerConfig[];
+};
+
+export type SubscriptionWorkerProvider = "codex" | "claude" | "grok";
+
+export type SubscriptionWorkerConfig = {
+  provider: SubscriptionWorkerProvider;
+  endpoint: URL;
+  token: string;
 };
 
 /**
@@ -436,6 +448,7 @@ function optionalHttpUrl(
  */
 function managedAgentConfig(
   environment: Environment,
+  allowedHosts: ReadonlySet<string>,
 ): ManagedAgentConfig | undefined {
   const endpoint = optionalHttpUrl(environment, "MANAGED_AGENT_AG_UI_URL");
   // BYO writes a URL too, but does not run our image or hold our deployment token.
@@ -453,7 +466,14 @@ function managedAgentConfig(
       "MANAGED_AGENT_TOKEN must be set when an installed PICKED_HARNESS_URL is set",
     );
   }
-  if ((!endpoint && !alsoRun) || !token) {
+  const subscriptionWorkers = subscriptionWorkerConfig(
+    environment,
+    allowedHosts,
+  );
+  if (
+    (!endpoint && !alsoRun && subscriptionWorkers.length === 0) ||
+    (!token && subscriptionWorkers.length === 0)
+  ) {
     return undefined;
   }
   /*
@@ -467,9 +487,36 @@ function managedAgentConfig(
    */
   return {
     ...(endpoint ? { endpoint } : {}),
-    token,
+    ...(token ? { token } : {}),
     ...(alsoRun ? { alsoRun } : {}),
+    subscriptionWorkers,
   };
+}
+
+function subscriptionWorkerConfig(
+  environment: Environment,
+  allowedHosts: ReadonlySet<string>,
+): SubscriptionWorkerConfig[] {
+  const providers = ["codex", "claude", "grok"] as const;
+  return providers.flatMap((provider) => {
+    const prefix = provider.toUpperCase();
+    const endpoint = optionalHttpUrl(environment, `${prefix}_AGENT_AG_UI_URL`);
+    const token = optional(environment, `${prefix}_AGENT_TOKEN`);
+    if (Boolean(endpoint) !== Boolean(token)) {
+      throw new Error(
+        `${prefix}_AGENT_AG_UI_URL and ${prefix}_AGENT_TOKEN must be set together`,
+      );
+    }
+    if (!endpoint || !token) return [];
+
+    const allowedHost = endpoint.host.toLowerCase();
+    if (!allowedHosts.has(allowedHost)) {
+      throw new Error(
+        `AGENT_ENDPOINT_ALLOWED_HOSTS must include ${allowedHost} for ${prefix}_AGENT_AG_UI_URL`,
+      );
+    }
+    return [{ provider, endpoint, token }];
+  });
 }
 
 function oauthClient(
@@ -500,8 +547,7 @@ function commaSeparated(environment: Environment, name: string): string[] {
 /**
  * Sign-in, if this deployment has an identity provider to sign people in with.
  *
- * Any one of the three turns authentication on. More than one is allowed and is the normal shape
- * for a company mid-migration, where some people are on Entra and some are still on Okta.
+ * Google or Okta turns authentication on. Both may be configured at once.
  *
  * Every combination that cannot work refuses at start-up rather than at somebody's first attempt to
  * sign in, which is the worst moment to discover it: a provider with half its credentials, a
@@ -521,7 +567,7 @@ function authConfig(
   if (!google && !microsoft && !okta) {
     if (secret || baseUrl) {
       throw new Error(
-        "BETTER_AUTH_SECRET or BETTER_AUTH_URL is set but no identity provider is. Configure GOOGLE_OAUTH_*, MICROSOFT_OAUTH_* or OKTA_OAUTH_*, or unset both",
+        "BETTER_AUTH_SECRET or BETTER_AUTH_URL is set but no identity provider is. Configure GOOGLE_OAUTH_* or OKTA_OAUTH_*, or unset both",
       );
     }
     return undefined;
@@ -554,6 +600,13 @@ function authConfig(
     );
   }
 
+  const ownerEmail = optional(environment, "OPENBOT_OWNER_EMAIL")
+    ?.trim()
+    .toLowerCase();
+  if (ownerEmail && !/^[^\s@]+@[^\s@]+$/.test(ownerEmail)) {
+    throw new Error("OPENBOT_OWNER_EMAIL must be a valid email address");
+  }
+
   return {
     baseUrl,
     secret,
@@ -565,6 +618,7 @@ function authConfig(
          * `127.0.0.1:3010`, which is the address the rest of this deployment hands out.
          */
         ["http://127.0.0.1:3010", "http://[::1]:3010", "http://localhost:3010"],
+    ...(ownerEmail ? { ownerEmail } : {}),
     initialAdminEmails,
     ...(google ? { google } : {}),
     ...(microsoft ? { microsoft } : {}),
@@ -573,21 +627,23 @@ function authConfig(
 }
 
 /**
- * Entra ID, and which directory it admits.
+ * Microsoft OAuth is off in the owner-only release.
  *
- * `common` by default, matching Microsoft's own default, and said out loud in `.env.example` because
- * it admits personal Microsoft accounts as well as work ones. A company that means "our staff"
- * wants its directory GUID here.
+ * Email-like Entra claims can change. The owner gate must bind the immutable `tid` and `oid` claims
+ * before this provider can safely identify the one allowed account.
  */
 function microsoftAuth(
   environment: Environment,
 ): (OAuthClient & { tenantId: string }) | undefined {
-  const client = oauthClient(environment, "MICROSOFT");
-  if (!client) return undefined;
-  return {
-    ...client,
-    tenantId: optional(environment, "MICROSOFT_OAUTH_TENANT_ID") ?? "common",
-  };
+  const configured = [
+    "MICROSOFT_OAUTH_CLIENT_ID",
+    "MICROSOFT_OAUTH_CLIENT_SECRET",
+    "MICROSOFT_OAUTH_TENANT_ID",
+  ].some((name) => Boolean(optional(environment, name)));
+  if (!configured) return undefined;
+  throw new Error(
+    "Microsoft sign-in is disabled until owner access binds immutable Entra tenant and object IDs; use Google or Okta",
+  );
 }
 
 /**
@@ -994,7 +1050,8 @@ export function loadConfig(
 ): DeploymentConfig {
   const google = oauthClient(environment, "GOOGLE");
   const auth = authConfig(environment, google);
-  const managedAgent = managedAgentConfig(environment);
+  const allowedAgentHosts = agentEndpointAllowedHosts(environment);
+  const managedAgent = managedAgentConfig(environment, allowedAgentHosts);
   const workerSharedSecret = optional(environment, "WORKER_SHARED_SECRET");
 
   return {
@@ -1002,7 +1059,7 @@ export function loadConfig(
     databaseUrl: required(environment, "DATABASE_URL"),
     keyEncryptionKey: keyEncryptionKey(environment),
     ...(managedAgent ? { managedAgent } : {}),
-    agentEndpointAllowedHosts: agentEndpointAllowedHosts(environment),
+    agentEndpointAllowedHosts: allowedAgentHosts,
     deploymentId: optional(environment, "DEPLOYMENT_ID"),
     publicUrl: (
       optional(environment, "OPENBOT_PUBLIC_URL") ?? auth?.baseUrl

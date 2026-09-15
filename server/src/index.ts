@@ -127,6 +127,12 @@ async function resolveRequestActor(request: Request): Promise<{
   if (!user) {
     throw new Error("A CopilotKit run requires a signed-in user.");
   }
+  if (
+    config.auth?.ownerEmail &&
+    user.email.trim().toLowerCase() !== config.auth.ownerEmail
+  ) {
+    throw new Error("A CopilotKit run requires the configured owner.");
+  }
   const roles = await roleRepository.rolesForUser(user.id);
   if (!roles.includes("admin") && !roles.includes("user")) {
     throw new Error("A CopilotKit run requires an authorized user.");
