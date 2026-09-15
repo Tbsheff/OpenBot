@@ -49,6 +49,7 @@ export function runAgent(options: {
   requestSignal: AbortSignal;
   sessionId?: string;
   onSession?: (sessionId: string) => void | Promise<void>;
+  onAssistantMessage?: (messageId: string) => void;
   beforeTerminal?: (
     outcome: "finished" | "failed" | "cancelled",
   ) => void | Promise<void>;
@@ -61,6 +62,7 @@ export function runAgent(options: {
     requestSignal,
     sessionId,
     onSession,
+    onAssistantMessage,
     beforeTerminal,
   } = options;
   const run: DriverRun = {
@@ -91,7 +93,9 @@ export function runAgent(options: {
         const messageId = () => `msg_${input.runId}_${messageIndex}`;
         const closeMessage = () => {
           if (!messageOpen) return;
-          send({ type: "TEXT_MESSAGE_END", messageId: messageId() });
+          const closedMessageId = messageId();
+          send({ type: "TEXT_MESSAGE_END", messageId: closedMessageId });
+          onAssistantMessage?.(closedMessageId);
           messageOpen = false;
           messageIndex += 1;
         };

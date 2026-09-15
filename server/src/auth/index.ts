@@ -114,11 +114,12 @@ function isConfiguredOwner(ownerEmail: string, candidateEmail: string) {
 }
 
 async function refuseNonOwner(
-  ownerEmail: string,
+  ownerEmail: string | undefined,
   candidateEmail: string,
   auditStore: AuditStore | undefined,
   userId?: string,
 ): Promise<void> {
+  if (!ownerEmail) return;
   if (isConfiguredOwner(ownerEmail, candidateEmail)) return;
   await record(auditStore, {
     eventType: "session.refused",

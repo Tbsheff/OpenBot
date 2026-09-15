@@ -16,3 +16,40 @@ export async function cleanupExpiredWorkspaces(
   }
   return removed;
 }
+
+export function startWorkspaceCleanup(options: {
+  store: RunStore;
+  manager: Pick<WorkspaceManager, "remove">;
+  retentionMs: number;
+  intervalMs: number;
+  now?: () => number;
+  onError?: (error: unknown) => void;
+}): () => void {
+  if (!Number.isInteger(options.retentionMs) || options.retentionMs < 1) {
+    throw new Error("Workspace retention must be a positive integer.");
+  }
+  if (!Number.isInteger(options.intervalMs) || options.intervalMs < 1) {
+    throw new Error("Workspace cleanup interval must be a positive integer.");
+  }
+
+  let running = false;
+  const sweep = async () => {
+    if (running) return;
+    running = true;
+    try {
+      await cleanupExpiredWorkspaces(
+        options.store,
+        options.manager,
+        (options.now?.() ?? Date.now()) - options.retentionMs,
+      );
+    } catch (error) {
+      options.onError?.(error);
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => void sweep(), options.intervalMs);
+  timer.unref();
+  void sweep();
+  return () => clearInterval(timer);
+}

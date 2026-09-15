@@ -30,10 +30,7 @@ fi
 
 deploy_root="/opt/openbot/deploy/aws"
 install -d -m 0700 /etc/openbot
-install -m 0755 "$deploy_root/bin/ecr-login" /opt/openbot/deploy/aws/bin/ecr-login
-install -m 0755 "$deploy_root/bin/render-secret-env" /opt/openbot/deploy/aws/bin/render-secret-env
-install -m 0755 "$deploy_root/bin/worker-firewall" /opt/openbot/deploy/aws/bin/worker-firewall
-install -m 0755 "$deploy_root/bin/publish-health-metrics" /opt/openbot/deploy/aws/bin/publish-health-metrics
+chmod 0755 "$deploy_root"/bin/*
 
 printf 'SECRET_ARN=%s\nAWS_REGION=%s\n' "$secret_arn" "$aws_region" \
   > "/etc/openbot/${role}-secret-ref"

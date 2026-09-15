@@ -118,6 +118,7 @@ export class HostSemaphore {
         !this.leaseStore.tryAcquireHostLease(waiter.owner, this.limit)
       ) {
         this.waiters.unshift(waiter);
+        waiter.signal.addEventListener("abort", waiter.abort, { once: true });
         waiter.poll = setInterval(() => this.grantNext(), this.pollMs);
         return;
       }
@@ -175,6 +176,7 @@ export class BoundedRunQueue implements RunCounts {
   }
 
   enqueue<T>(run: QueuedRun<T>): Promise<T> {
+    if (run.signal.aborted) return Promise.reject(new RunDisconnectedError());
     const owner = `${this.provider}:${run.runId}`;
     const canStart =
       this.active + this.dispatching < this.concurrency &&
@@ -182,8 +184,6 @@ export class BoundedRunQueue implements RunCounts {
     const immediate = canStart ? this.host.tryAcquire(owner) : undefined;
     if (!immediate && this.pending.length >= this.pendingLimit)
       throw new CapacityError();
-    if (run.signal.aborted) return Promise.reject(new RunDisconnectedError());
-
     const result = new Promise<T>((resolve, reject) => {
       const item = { ...run, resolve, reject } as QueueItem<T>;
       if (run.onHeartbeat) {

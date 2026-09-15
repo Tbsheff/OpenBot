@@ -91,6 +91,23 @@ jobs:
         if: matrix.package == 'agent-subscription-gateway'
         working-directory: ${{ matrix.package }}
 
+  terraform:
+    name: terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@5e8dbf3c6d9deaf4193ca7a8fb23f2ac83bb6c85 # v4.0.0
+        with:
+          terraform_version: 1.13.3
+      - run: terraform fmt -check -recursive
+        working-directory: infra/aws
+      - run: terraform init -backend=false
+        working-directory: infra/aws/environments/personal
+      - run: terraform validate -no-color
+        working-directory: infra/aws/environments/personal
+
   chart:
     name: chart (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -481,7 +498,7 @@ jobs:
     name: verify
     runs-on: ubuntu-latest
     if: always()
-    needs: [static, deployables, chart, test, python-harness, build, migrations, image, component-dockerfiles]
+    needs: [static, deployables, terraform, chart, test, python-harness, build, migrations, image, component-dockerfiles]
     steps:
       - name: Require every check
         env:

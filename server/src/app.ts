@@ -372,7 +372,10 @@ export function createApp(
       const roles = session?.user
         ? ((await roleRepository?.rolesForUser(session.user.id)) ?? [])
         : [];
-      if (!roles.includes("admin")) {
+      const ownerEmail = config.auth?.ownerEmail;
+      const isOwner =
+        !ownerEmail || session?.user.email.trim().toLowerCase() === ownerEmail;
+      if (!isOwner || !roles.includes("admin")) {
         return context.json(
           { error: "Only an administrator may change identity providers." },
           403,
@@ -428,7 +431,7 @@ export function createApp(
   const requireUser = config.singleUser
     ? createDevRequireUser()
     : auth && roleRepository
-      ? createRequireUser(auth, roleRepository)
+      ? createRequireUser(auth, roleRepository, config.auth?.ownerEmail)
       : authenticationUnavailable;
 
   app.get("/api/me", requireUser, async (context) =>

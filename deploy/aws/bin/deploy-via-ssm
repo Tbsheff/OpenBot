@@ -117,17 +117,19 @@ command_id="$(aws ssm send-command \
   --query Command.CommandId \
   --output text)"
 
-aws ssm wait command-executed \
-  --region "$aws_region" \
-  --command-id "$command_id" \
-  --instance-id "$instance_id"
-
-status="$(aws ssm get-command-invocation \
-  --region "$aws_region" \
-  --command-id "$command_id" \
-  --instance-id "$instance_id" \
-  --query Status \
-  --output text)"
+status="Pending"
+for _ in $(seq 1 180); do
+  status="$(aws ssm get-command-invocation \
+    --region "$aws_region" \
+    --command-id "$command_id" \
+    --instance-id "$instance_id" \
+    --query Status \
+    --output text 2>/dev/null || true)"
+  case "$status" in
+    Success|Cancelled|TimedOut|Failed|Cancelling) break ;;
+  esac
+  sleep 5
+done
 if [[ "$status" != "Success" ]]; then
   aws ssm get-command-invocation \
     --region "$aws_region" \

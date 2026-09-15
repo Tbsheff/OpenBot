@@ -6,7 +6,10 @@ import {
   scrubProviderEnvironment,
   WorkspaceManager,
 } from "../src/workspaces/workspace-manager";
-import { cleanupExpiredWorkspaces } from "../src/workspaces/cleanup";
+import {
+  cleanupExpiredWorkspaces,
+  startWorkspaceCleanup,
+} from "../src/workspaces/cleanup";
 import { RunStore } from "../src/storage/run-store";
 
 const directories: string[] = [];
@@ -62,6 +65,23 @@ describe("isolated workspaces", () => {
     expect(() => manager.pathFor("../escape")).toThrow(/run ID/i);
   }, 15_000);
 
+  test("an aborted clone removes its partial workspace", async () => {
+    const { source, jobs } = await fixture();
+    const manager = new WorkspaceManager({
+      provider: "codex",
+      repository: source,
+      baseBranch: "main",
+      jobRoot: jobs,
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(manager.create("aborted", controller.signal)).rejects.toThrow(
+      /workspace operation failed/i,
+    );
+    expect(await Bun.file(join(jobs, "codex", "aborted")).exists()).toBe(false);
+  });
+
   test("retains a binary patch and commit metadata without provider push credentials", async () => {
     const { source, jobs } = await fixture();
     const manager = new WorkspaceManager({
@@ -88,6 +108,7 @@ describe("isolated workspaces", () => {
       GIT_ASKPASS: "/credential-helper",
       AWS_SESSION_TOKEN: "instance-secret",
       DOCKER_HOST: "unix:///var/run/docker.sock",
+      GIT_EXTERNAL_DIFF: "/tmp/agent-controlled-diff",
       SAFE_VALUE: "kept",
     });
     expect(environment).toEqual(
@@ -98,6 +119,7 @@ describe("isolated workspaces", () => {
     expect(environment).not.toHaveProperty("GIT_ASKPASS");
     expect(environment).not.toHaveProperty("AWS_SESSION_TOKEN");
     expect(environment).not.toHaveProperty("DOCKER_HOST");
+    expect(environment).not.toHaveProperty("GIT_EXTERNAL_DIFF");
     expect(git(workspace.path, ["remote", "get-url", "--push", "origin"])).toBe(
       "disabled://push-not-allowed",
     );
@@ -168,4 +190,32 @@ describe("isolated workspaces", () => {
     );
     runs.close();
   }, 15_000);
+
+  test("runs retained-workspace cleanup on a bounded production loop", async () => {
+    let removals = 0;
+    const stop = startWorkspaceCleanup({
+      store: {
+        listWorkspaceCleanupCandidates: () => [
+          {
+            provider: "codex",
+            runId: "done",
+            workspacePath: "/jobs/codex/done",
+          },
+        ],
+        clearWorkspace: () => true,
+      } as never,
+      manager: {
+        async remove() {
+          removals += 1;
+        },
+      },
+      retentionMs: 1,
+      intervalMs: 5,
+      now: () => 10,
+    });
+
+    await Bun.sleep(12);
+    stop();
+    expect(removals).toBeGreaterThan(0);
+  });
 });

@@ -5,6 +5,7 @@ import { RunService } from "./runs/run-service";
 import { serveGateway } from "./server";
 import { RunStore } from "./storage/run-store";
 import { WorkspaceManager } from "./workspaces/workspace-manager";
+import { startWorkspaceCleanup } from "./workspaces/cleanup";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -54,6 +55,23 @@ const workspaces = new WorkspaceManager({
   repository: required("REPOSITORY_URL"),
   baseBranch: required("BASE_BRANCH"),
   jobRoot: required("JOB_ROOT"),
+  commandTimeoutMs: positiveInteger("WORKSPACE_COMMAND_TIMEOUT_MS", 300_000),
+});
+const stopWorkspaceCleanup = startWorkspaceCleanup({
+  store,
+  manager: workspaces,
+  retentionMs:
+    positiveInteger("WORKSPACE_RETENTION_HOURS", 24) * 60 * 60 * 1_000,
+  intervalMs:
+    positiveInteger("WORKSPACE_CLEANUP_INTERVAL_SECONDS", 3_600) * 1_000,
+  onError: (error) =>
+    console.error(
+      JSON.stringify({
+        type: "workspace-cleanup-failed",
+        provider,
+        error: String(error),
+      }),
+    ),
 });
 const runService = new RunService({
   driver,
@@ -71,6 +89,7 @@ const server = serveGateway({
 
 function stop(): void {
   server.stop(true);
+  stopWorkspaceCleanup();
   store.close();
   if (leaseStore !== store) leaseStore.close();
 }

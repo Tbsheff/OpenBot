@@ -86,4 +86,21 @@ describe("server authorization", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: "ok" });
   });
+
+  test("rejects an old session when private owner admission is configured", async () => {
+    const privateConfig = loadConfig({
+      ...testEnvironment(),
+      OPENBOT_OWNER_EMAIL: "owner@openbot.test",
+    });
+    const app = createApp(privateConfig, authenticatedAs("admin"), {
+      rolesForUser: async () => ["admin"],
+    });
+
+    const response = await app.request("http://openbot.local/api/admin/status");
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: "Owner access required.",
+    });
+  });
 });

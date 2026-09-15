@@ -16,7 +16,7 @@ import { prepareProviderRun } from "./session-input";
 const RESTART_ERROR = "Gateway restarted; submit a new run.";
 
 interface WorkspaceOperations {
-  create(runId: string): Promise<WorkspaceLease>;
+  create(runId: string, signal?: AbortSignal): Promise<WorkspaceLease>;
   captureResult(workspace: WorkspaceLease): Promise<WorkspaceResult>;
 }
 
@@ -95,6 +95,7 @@ export class RunService implements GatewayRunService {
         streamController = controller;
       },
       cancel() {
+        closed = true;
         connection.abort();
       },
     });
@@ -121,14 +122,15 @@ export class RunService implements GatewayRunService {
         close();
       });
     } catch (error) {
-      this.failInterrupted(input.runId, safeSetupFailure(error));
       close();
       if (error instanceof CapacityError) {
+        this.options.store.deleteQueuedRun(this.provider, input.runId);
         return Response.json(
           { error: error.message, retryable: true },
           { status: 429, headers: { "retry-after": "5" } },
         );
       }
+      this.failInterrupted(input.runId, safeSetupFailure(error));
       throw error;
     }
 
@@ -145,7 +147,10 @@ export class RunService implements GatewayRunService {
       "queued",
     ]);
     try {
-      const activeWorkspace = await this.options.workspaces.create(input.runId);
+      const activeWorkspace = await this.options.workspaces.create(
+        input.runId,
+        signal,
+      );
       workspace = activeWorkspace;
       this.options.store.attachWorkspace(
         this.provider,
@@ -162,6 +167,7 @@ export class RunService implements GatewayRunService {
         "preparing",
       ]);
       let providerSessionId = prepared.sessionId;
+      let emittedAssistantMessageId: string | undefined;
       let terminalRecorded = false;
       const response = runAgent({
         input: {
@@ -177,6 +183,9 @@ export class RunService implements GatewayRunService {
         onSession: (sessionId) => {
           providerSessionId = sessionId;
         },
+        onAssistantMessage: (messageId) => {
+          emittedAssistantMessageId = messageId;
+        },
         beforeTerminal: async (outcome) => {
           if (terminalRecorded) return;
           try {
@@ -191,8 +200,12 @@ export class RunService implements GatewayRunService {
               provider: this.provider,
               runId: input.runId,
               sessionId: providerSessionId,
-              ...(prepared.acknowledgedMessageId
-                ? { acknowledgedMessageId: prepared.acknowledgedMessageId }
+              ...((emittedAssistantMessageId ?? prepared.acknowledgedMessageId)
+                ? {
+                    acknowledgedMessageId:
+                      emittedAssistantMessageId ??
+                      prepared.acknowledgedMessageId,
+                  }
                 : {}),
             });
           }

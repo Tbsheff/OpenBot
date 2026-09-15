@@ -171,4 +171,38 @@ describe("bounded run admission", () => {
     secondStore.close();
     await rm(directory, { recursive: true });
   });
+
+  test("does not acquire a host lease for an already disconnected run", async () => {
+    const host = new HostSemaphore(1);
+    const queue = new BoundedRunQueue({ provider: "codex", host });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      queue.enqueue({
+        runId: "disconnected",
+        signal: controller.signal,
+        run: async () => undefined,
+      }),
+    ).rejects.toBeInstanceOf(RunDisconnectedError);
+    expect(host.activeCount).toBe(0);
+  });
+
+  test("keeps a lease-backed waiter cancellable while it polls", async () => {
+    const leases = {
+      held: true,
+      tryAcquireHostLease() {
+        return !this.held;
+      },
+      releaseHostLease() {},
+    };
+    const host = new HostSemaphore({ limit: 1, leaseStore: leases, pollMs: 2 });
+    const controller = new AbortController();
+    const waiting = host.acquire(controller.signal, "codex:waiting");
+    await Bun.sleep(6);
+    controller.abort();
+
+    await expect(waiting).rejects.toBeInstanceOf(RunDisconnectedError);
+    expect(host.activeCount).toBe(0);
+  });
 });

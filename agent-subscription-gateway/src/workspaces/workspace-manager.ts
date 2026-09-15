@@ -13,6 +13,8 @@ const PUSH_ENVIRONMENT = new Set([
   "SSH_ASKPASS",
   "GIT_SSH",
   "GIT_SSH_COMMAND",
+  "GIT_EXTERNAL_DIFF",
+  "GIT_DIFF_OPTS",
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
   "AWS_SESSION_TOKEN",
@@ -58,18 +60,33 @@ function assertSafeSegment(label: string, value: string): void {
 
 async function command(
   args: readonly string[],
-  options: { cwd?: string; env?: Record<string, string> } = {},
+  options: {
+    cwd?: string;
+    env?: Record<string, string>;
+    signal?: AbortSignal;
+    timeoutMs?: number;
+  } = {},
 ): Promise<string> {
   const [program, ...rawProgramArgs] = args;
   if (!program) throw new Error("Workspace command is empty.");
   const programArgs =
     program === "git"
-      ? ["-c", "core.hooksPath=/dev/null", ...rawProgramArgs]
+      ? [
+          "-c",
+          "core.hooksPath=/dev/null",
+          "-c",
+          "core.fsmonitor=false",
+          "-c",
+          "diff.external=",
+          ...rawProgramArgs,
+        ]
       : rawProgramArgs;
   try {
     const { stdout } = await execFileAsync(program, programArgs, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       ...(options.env ? { env: options.env } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+      timeout: options.timeoutMs ?? 300_000,
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -95,6 +112,7 @@ export class WorkspaceManager {
   private readonly baseBranch: string;
   private readonly jobRoot: string;
   private readonly gitEnvironment: Record<string, string>;
+  private readonly commandTimeoutMs: number;
 
   constructor(options: {
     provider: string;
@@ -102,6 +120,7 @@ export class WorkspaceManager {
     baseBranch: string;
     jobRoot: string;
     gitEnvironment?: Record<string, string | undefined>;
+    commandTimeoutMs?: number;
   }) {
     assertSafeSegment("provider", options.provider);
     assertSafeSegment("base branch", options.baseBranch);
@@ -118,6 +137,10 @@ export class WorkspaceManager {
     this.repository = options.repository;
     this.baseBranch = options.baseBranch;
     this.jobRoot = resolve(options.jobRoot);
+    this.commandTimeoutMs = options.commandTimeoutMs ?? 300_000;
+    if (!Number.isInteger(this.commandTimeoutMs) || this.commandTimeoutMs < 1) {
+      throw new Error("Workspace command timeout must be a positive integer.");
+    }
     this.gitEnvironment = scrubProviderEnvironment({
       ...process.env,
       ...options.gitEnvironment,
@@ -132,7 +155,7 @@ export class WorkspaceManager {
     return candidate;
   }
 
-  async create(runId: string): Promise<WorkspaceLease> {
+  async create(runId: string, signal?: AbortSignal): Promise<WorkspaceLease> {
     const target = this.pathFor(runId);
     await mkdir(join(this.jobRoot, this.provider), {
       recursive: true,
@@ -155,11 +178,17 @@ export class WorkspaceManager {
           this.repository,
           target,
         ],
-        { env: this.gitEnvironment },
+        {
+          env: this.gitEnvironment,
+          ...(signal ? { signal } : {}),
+          timeoutMs: this.commandTimeoutMs,
+        },
       );
       await command(["git", "checkout", "--detach", this.baseBranch], {
         cwd: target,
         env: this.gitEnvironment,
+        ...(signal ? { signal } : {}),
+        timeoutMs: this.commandTimeoutMs,
       });
       await command(
         [
@@ -170,7 +199,12 @@ export class WorkspaceManager {
           "origin",
           "disabled://push-not-allowed",
         ],
-        { cwd: target, env: this.gitEnvironment },
+        {
+          cwd: target,
+          env: this.gitEnvironment,
+          ...(signal ? { signal } : {}),
+          timeoutMs: this.commandTimeoutMs,
+        },
       );
     } catch (error) {
       await rm(target, { recursive: true, force: true });
@@ -183,7 +217,11 @@ export class WorkspaceManager {
       throw new Error("Workspace escaped the canonical job root.");
     }
     const baseCommit = (
-      await command(["git", "rev-parse", "HEAD"], { cwd: target })
+      await command(["git", "rev-parse", "HEAD"], {
+        cwd: target,
+        ...(signal ? { signal } : {}),
+        timeoutMs: this.commandTimeoutMs,
+      })
     ).trim();
     return { provider: this.provider, runId, path: target, baseCommit };
   }

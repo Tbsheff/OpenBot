@@ -199,6 +199,15 @@ export class RunStore {
     return row ? storedRun(row) : undefined;
   }
 
+  deleteQueuedRun(provider: string, runId: string): boolean {
+    const result = this.database
+      .query(
+        "DELETE FROM runs WHERE provider = ? AND run_id = ? AND state = 'queued'",
+      )
+      .run(provider, runId);
+    return result.changes === 1;
+  }
+
   listRuns(): StoredRun[] {
     return (
       this.database

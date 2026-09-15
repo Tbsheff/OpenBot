@@ -26,8 +26,8 @@ const baseEnvironment = {
  * The same deployment with nothing signing anybody in.
  *
  * `baseEnvironment` ships Google and a session secret because most tests want authentication on.
- * The provider tests need the opposite starting point, or "Microsoft is configured" cannot be told
- * apart from "Microsoft and the Google that was already there".
+ * The provider tests need the opposite starting point, or a configured provider cannot be told
+ * apart from Google that was already there.
  */
 /**
  * A deployment that is actually deployed.
@@ -380,8 +380,8 @@ describe("deployment configuration", () => {
   /**
    * Sign-in with more than one identity provider.
    *
-   * A company mid-migration has some people on Entra and some still on Okta, so more than one at a
-   * time is the normal shape rather than a corner. These assert the shape the sign-in screen reads
+   * A company can have people on Google and Okta, so more than one at a time is a normal shape.
+   * These assert the shape the sign-in screen reads
    * and every arrangement that cannot work refusing at start-up, which is the only moment a
    * misconfiguration is cheap to find.
    */
@@ -394,36 +394,16 @@ describe("deployment configuration", () => {
   /** What a deployment with no provider has to say before it is allowed to come up. */
   const OPEN = { OPENBOT_SINGLE_USER: "true" };
 
-  test("enables Microsoft, and admits any account until told a directory", () => {
-    const config = loadConfig({
-      ...withoutSignIn,
-      ...SESSION,
-      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
-      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
-    });
-
-    // `common` is Microsoft's own default and admits personal accounts as well as work ones. A
-    // deployment that means "our staff" has to say so with a directory GUID.
-    expect(config.auth?.microsoft).toEqual({
-      clientId: "entra-client-id",
-      clientSecret: "entra-client-secret",
-      tenantId: "common",
-    });
-    expect(configuredAuthProviders(config.auth)).toEqual(["microsoft"]);
-  });
-
-  test("narrows Microsoft to one directory when given a tenant", () => {
-    const config = loadConfig({
-      ...withoutSignIn,
-      ...SESSION,
-      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
-      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
-      MICROSOFT_OAUTH_TENANT_ID: "8f2c1e40-0000-0000-0000-000000000000",
-    });
-
-    expect(config.auth?.microsoft?.tenantId).toBe(
-      "8f2c1e40-0000-0000-0000-000000000000",
-    );
+  test("refuses Microsoft until owner access can use immutable claims", () => {
+    expect(() =>
+      loadConfig({
+        ...withoutSignIn,
+        ...SESSION,
+        MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
+        MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
+        MICROSOFT_OAUTH_TENANT_ID: "8f2c1e40-0000-0000-0000-000000000000",
+      }),
+    ).toThrow("immutable Entra tenant and object IDs");
   });
 
   test("enables Okta against its issuer", () => {
@@ -463,25 +443,19 @@ describe("deployment configuration", () => {
     ).toThrow("OKTA_OAUTH_CLIENT_ID");
   });
 
-  test("carries all three at once, in a fixed order", () => {
+  test("carries Google and Okta at once, in a fixed order", () => {
     const config = loadConfig({
       ...withoutSignIn,
       ...SESSION,
       GOOGLE_OAUTH_CLIENT_ID: "google-client-id",
       GOOGLE_OAUTH_CLIENT_SECRET: "google-client-secret",
-      MICROSOFT_OAUTH_CLIENT_ID: "entra-client-id",
-      MICROSOFT_OAUTH_CLIENT_SECRET: "entra-client-secret",
       OKTA_OAUTH_CLIENT_ID: "okta-client-id",
       OKTA_OAUTH_CLIENT_SECRET: "okta-client-secret",
       OKTA_OAUTH_ISSUER: "https://example.okta.com/oauth2/default",
     });
 
     // The order the buttons appear in, fixed here so it cannot change with how a .env was written.
-    expect(configuredAuthProviders(config.auth)).toEqual([
-      "google",
-      "microsoft",
-      "okta",
-    ]);
+    expect(configuredAuthProviders(config.auth)).toEqual(["google", "okta"]);
   });
 
   /**
@@ -497,10 +471,10 @@ describe("deployment configuration", () => {
     expect(() => loadConfig(withoutAdmins)).toThrow("INITIAL_ADMIN_EMAILS");
   });
 
-  test("refuses sign-in without the one owner identity admission setting", () => {
+  test("keeps general sign-in when no private owner admission setting is present", () => {
     const { OPENBOT_OWNER_EMAIL: _none, ...withoutOwner } = baseEnvironment;
 
-    expect(() => loadConfig(withoutOwner)).toThrow("OPENBOT_OWNER_EMAIL");
+    expect(loadConfig(withoutOwner).auth?.ownerEmail).toBeUndefined();
   });
 
   test("normalizes the owner email independently of administrator assignment", () => {

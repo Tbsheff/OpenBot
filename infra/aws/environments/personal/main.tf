@@ -44,14 +44,6 @@ resource "aws_kms_alias" "ebs" {
   target_key_id = aws_kms_key.ebs.key_id
 }
 
-resource "aws_ebs_encryption_by_default" "this" {
-  enabled = true
-}
-
-resource "aws_ebs_default_kms_key" "this" {
-  key_arn = aws_kms_key.ebs.arn
-}
-
 module "network" {
   source = "../../modules/network"
 

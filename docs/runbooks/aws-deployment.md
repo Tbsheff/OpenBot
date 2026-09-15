@@ -9,7 +9,7 @@ Use an AWS account where you can run Terraform. Choose one region. Create these 
 - two Secrets Manager secrets, one from `deploy/aws/control-secret.example.json` and one from `deploy/aws/worker-secret.example.json`;
 - the account-wide GitHub Actions OIDC provider for `https://token.actions.githubusercontent.com`, with audience `sts.amazonaws.com`;
 - a public DNS `A` record you can later point to the control Elastic IP;
-- Google, Microsoft, or Okta OAuth values for that public domain;
+- Google or Okta OAuth values for that public domain;
 - CopilotKit Intelligence values required by OpenBot.
 
 Generate all secret values on your own machine. Use a distinct random value for each provider gateway token. The matching control and worker token values must be equal for that provider. Do not put any provider login token in either AWS secret.
@@ -65,6 +65,7 @@ Run `Deploy personal AWS stack` from the GitHub Actions page. Select `all`. The 
 7. Restore the prior image field if a host service fails to start.
 
 The control service starts PostgreSQL, runs migrations once, and then starts OpenBot and Caddy. The worker starts Codex and Grok. Claude stays off until its legal release gate passes.
+The first worker deploy checks process health, not provider readiness, because provider sign-in happens after the containers exist. Check each `/ready` endpoint after sign-in and before the live task gate.
 
 ## 5. Sign in and accept the release
 
@@ -75,3 +76,5 @@ Run one new Codex task and one new Grok task from OpenBot. For each task, confir
 ## Limits of a local test
 
 Terraform validation, Compose rendering, fake provider protocol tests, and local signed-in provider tests do not prove the AWS path. The release is end-to-end only after the protected workflow, DNS and TLS, owner IdP sign-in, provider device sign-ins, OpenBot runs, container replacement, one alert test, and one restore test pass in the target AWS account.
+
+The stack encrypts each OpenBot root and data volume with its own KMS key. It does not change the account-wide EBS encryption setting or default KMS key.

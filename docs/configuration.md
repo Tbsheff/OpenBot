@@ -188,9 +188,7 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `OPENBOT_SINGLE_USER`        | One fixed administrator and no sign-in. **Required** when no identity provider is configured, or the deployment refuses to start. Ignored when one is. |
 | `GOOGLE_OAUTH_CLIENT_ID`     | Google OAuth client id.                                                                |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Google OAuth client secret.                                                            |
-| `MICROSOFT_OAUTH_CLIENT_ID`  | Microsoft Entra ID application id.                                                     |
-| `MICROSOFT_OAUTH_CLIENT_SECRET` | Microsoft Entra ID client secret.                                                   |
-| `MICROSOFT_OAUTH_TENANT_ID`  | Directory to admit. `common` by default, which admits personal accounts too; a GUID admits one directory. |
+| `MICROSOFT_OAUTH_*`          | Disabled in this owner-only release until owner access binds immutable Entra tenant and object IDs. |
 | `OKTA_OAUTH_CLIENT_ID`       | Okta client id.                                                                        |
 | `OKTA_OAUTH_CLIENT_SECRET`   | Okta client secret.                                                                    |
 | `OKTA_OAUTH_ISSUER`          | Which Okta, for example `https://example.okta.com/oauth2/default`.                     |
@@ -198,7 +196,7 @@ Two things are worth knowing before pointing a deployment at any gateway. Not ev
 | `BETTER_AUTH_URL`            | Public API server base URL, where OAuth callbacks return. Required with any provider.  |
 | `TRUSTED_ORIGINS`            | Comma-separated app origins accepted by the API, plus every host in a registered OIDC provider's discovery document. |
 | `INITIAL_ADMIN_EMAILS`       | Comma-separated administrators. **Required** with any provider.                        |
-| `OPENBOT_OWNER_EMAIL`        | The only email admitted to this private deployment. **Required** with any provider. Normalized to lower case. |
+| `OPENBOT_OWNER_EMAIL`        | Optional. When set, it is the only email admitted to a private deployment. Normalized to lower case. |
 | `OPENBOT_PUBLIC_URL`         | Public address of this API. Defaults to `BETTER_AUTH_URL`.                              |
 | `OPENBOT_APP_URL`            | Where the browser app is served. Defaults to the first `TRUSTED_ORIGINS` entry.          |
 
@@ -210,13 +208,15 @@ configuration at all.
 
 **Any one provider turns sign-in on**, and several may be configured at once. Each provider's id and
 secret must be set together, Okta additionally needs its issuer, and any of them requires
-`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `OPENBOT_OWNER_EMAIL` and `INITIAL_ADMIN_EMAILS`. Every
+`BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` and `INITIAL_ADMIN_EMAILS`. Every
 incomplete combination is refused at start-up rather than at somebody's first attempt to sign in.
 
-`OPENBOT_OWNER_EMAIL` is an admission check, not a role grant. OpenBot checks it before it creates a
-user or session. A valid account from the configured identity provider still gets a refusal when
-its normalized email differs. `INITIAL_ADMIN_EMAILS` separately decides who has the administrator
-role; the owner email can be listed there, but the settings do not replace each other.
+`OPENBOT_OWNER_EMAIL` makes a deployment private to one account. When it is set, OpenBot checks it
+before it creates a user or session and on each protected request. A valid account from the
+configured identity provider still gets a refusal when its normalized email differs.
+`INITIAL_ADMIN_EMAILS` separately decides who has the administrator role; the owner email can be
+listed there, but the settings do not replace each other. The private AWS stack requires both to
+name the same account.
 
 `INITIAL_ADMIN_EMAILS` is required because nothing else grants the administrator role at first: an
 address it names becomes an administrator at every sign-in and cannot be demoted from the People

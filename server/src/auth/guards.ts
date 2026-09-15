@@ -53,6 +53,7 @@ export function createRoleRepository(database: Database): RoleRepository {
 export function createRequireUser(
   auth: AuthService,
   roleRepository: RoleRepository,
+  ownerEmail?: string,
 ): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (context, next) => {
     const session = await auth.api.getSession({
@@ -62,6 +63,10 @@ export function createRequireUser(
 
     if (!session) {
       return context.json({ error: "Authentication required." }, 401);
+    }
+
+    if (ownerEmail && session.user.email.trim().toLowerCase() !== ownerEmail) {
+      return context.json({ error: "Owner access required." }, 403);
     }
 
     const roles = await roleRepository.rolesForUser(session.user.id);

@@ -19,6 +19,9 @@ x-gateway: &gateway
     PROVIDER_CONCURRENCY: "1"
     HOST_CONCURRENCY: "1"
     HOST_SEMAPHORE_PATH: /var/lib/openbot-gateway/host-semaphore.sqlite
+    WORKSPACE_COMMAND_TIMEOUT_MS: "300000"
+    WORKSPACE_RETENTION_HOURS: "24"
+    WORKSPACE_CLEANUP_INTERVAL_SECONDS: "3600"
     AWS_EC2_METADATA_DISABLED: "true"
   tmpfs:
     - /tmp:rw,noexec,nosuid,nodev,size=256m

@@ -74,6 +74,8 @@ test("uses SSM, exact ECR and log permissions, and no wildcard IAM action", () =
 test("requires IMDSv2 and retains encrypted data and provider auth volumes", () => {
   const source = terraformText();
 
+  expect(source).not.toContain('resource "aws_ebs_encryption_by_default"');
+  expect(source).not.toContain('resource "aws_ebs_default_kms_key"');
   expect(source.match(/http_tokens\s*=\s*"required"/g)?.length).toBe(2);
   expect(source.match(/http_put_response_hop_limit\s*=\s*1/g)?.length).toBe(2);
   expect(source.match(/encrypted\s*=\s*true/g)?.length).toBeGreaterThanOrEqual(
